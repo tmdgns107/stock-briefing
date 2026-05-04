@@ -1,4 +1,4 @@
-from tools.volume_tool import get_most_active
+from tools.volume_tool import get_most_active_by_dollar_volume
 from tools.news_tool import get_market_news_mentions
 from tools.trends_tool import get_news_buzz_scores
 from config import TOP_N
@@ -13,8 +13,8 @@ def discover_tickers() -> tuple[list[str], dict]:
       - 종목 뉴스 버즈 : 30%  (Finnhub 종목별 뉴스 건수 — Google Trends 대체)
       - 시장 뉴스 언급 : 20%  (일반 시장 뉴스에서 티커 언급 횟수)
     """
-    print("[ 1/3 ] 거래량 상위 종목 수집 중...")
-    active_tickers = get_most_active(count=20)
+    print("[ 1/3 ] 거래금액 상위 종목 수집 중...")
+    active_tickers = get_most_active_by_dollar_volume(count=20)
 
     print("[ 2/3 ] 종목별 뉴스 버즈 수집 중...")
     buzz_scores = get_news_buzz_scores(active_tickers)
