@@ -10,31 +10,38 @@ def build_prompt(ticker: str, stock: dict, news: list[dict]) -> str:
         [f"- [{n['source']}] {n['headline']}" for n in news]
     ) or "관련 뉴스 없음"
 
-    change_sign = "+" if stock["change_pct"] >= 0 else ""
+    fmt = lambda v, prefix="", suffix="", decimals=2: (
+        f"{prefix}{v:.{decimals}f}{suffix}" if isinstance(v, (int, float)) else "N/A"
+    )
 
     return f"""
-종목: {stock['name']} ({ticker})
-현재가: ${stock['price']} ({change_sign}{stock['change_pct']}%)
-시가총액: ${stock.get('market_cap', 'N/A'):,}
-PER: {stock.get('pe_ratio', 'N/A')}
-52주 최고: ${stock.get('52w_high', 'N/A')} / 최저: ${stock.get('52w_low', 'N/A')}
+종목: {stock['name']} ({ticker}) | 섹터: {stock.get('sector', 'N/A')}
+현재가: ${stock['price']} | 주간 등락률: {'+' if stock['weekly_change_pct'] >= 0 else ''}{stock['weekly_change_pct']}%
+시가총액: {stock['market_cap']}
+PER: {fmt(stock.get('pe_ratio'))} | Forward PER: {fmt(stock.get('forward_pe'))} | EPS: {fmt(stock.get('eps'), '$')}
+52주 고가: {fmt(stock.get('52w_high'), '$')} | 52주 저가: {fmt(stock.get('52w_low'), '$')}
+애널리스트 목표주가: {fmt(stock.get('target_price'), '$')}
 
 최근 뉴스:
 {news_text}
 
-위 데이터를 바탕으로 {REPORT_LANGUAGE}로 간결한 투자 브리핑을 작성해주세요.
-3~5문장으로 핵심만 정리해주세요.
+위 데이터를 바탕으로 {REPORT_LANGUAGE}로 아래 3개 항목을 각각 1~2문장으로 작성해주세요.
+반드시 아래 형식을 지켜주세요:
+
+[주목이유] (이번 주 왜 주목받고 있는지)
+[핵심뉴스] (가장 중요한 뉴스 이슈)
+[리스크] (투자 시 주의할 점)
 """.strip()
 
 
-def generate_report(tickers: list[str]) -> str:
+def generate_report(tickers: list[str], scores: dict) -> list[dict]:
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
-    reports = []
+    results = []
     for ticker in tickers:
         stock = get_stock_data(ticker)
         if "error" in stock:
-            reports.append(f"### {ticker}\n데이터 수집 실패\n")
+            results.append({"ticker": ticker, "error": True})
             continue
 
         news = get_news(ticker)
@@ -42,16 +49,32 @@ def generate_report(tickers: list[str]) -> str:
 
         message = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=500,
+            max_tokens=400,
             messages=[{"role": "user", "content": prompt}],
         )
 
-        change_sign = "+" if stock["change_pct"] >= 0 else ""
-        summary = message.content[0].text
-        reports.append(
-            f"### {stock['name']} ({ticker})\n"
-            f"**${stock['price']} ({change_sign}{stock['change_pct']}%)**\n\n"
-            f"{summary}\n"
-        )
+        analysis = _parse_analysis(message.content[0].text)
 
-    return "\n---\n".join(reports)
+        results.append({
+            "ticker": ticker,
+            "stock": stock,
+            "analysis": analysis,
+            "scores": scores.get(ticker, {}),
+        })
+
+    return results
+
+
+def _parse_analysis(text: str) -> dict:
+    sections = {"주목이유": "", "핵심뉴스": "", "리스크": ""}
+    current = None
+    for line in text.splitlines():
+        line = line.strip()
+        for key in sections:
+            if line.startswith(f"[{key}]"):
+                current = key
+                line = line[len(f"[{key}]"):].strip()
+                break
+        if current and line:
+            sections[current] += (" " if sections[current] else "") + line
+    return sections
