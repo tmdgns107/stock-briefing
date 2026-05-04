@@ -82,8 +82,8 @@ def _stock_card(item: dict) -> str:
   <div style="background:#f0f4f8; border-radius:6px; padding:10px 14px; font-size:12px; color:#4a5568; margin-bottom:16px;">
     <span style="font-weight:600;">선정 점수</span>&nbsp;&nbsp;
     거래량 {_score_bar(sc.get('volume', 0))}&nbsp;
-    트렌드 {_score_bar(sc.get('trends', 0))}&nbsp;
-    뉴스&nbsp;&nbsp; {_score_bar(sc.get('news', 0))}
+    뉴스버즈 {_score_bar(sc.get('buzz', 0))}&nbsp;
+    언급 {_score_bar(sc.get('mention', 0))}
     <span style="float:right; font-weight:700; color:#2b6cb0;">종합 {sc.get('total', 0):.0f}점</span>
   </div>
 
@@ -185,7 +185,7 @@ def send_email(report_items: list[dict], theme: dict | None = None):
       이번 주 선정 종목: <strong>{' · '.join(tickers)}</strong>
     </div>
     <div style="margin-top:6px; font-size:12px; opacity:0.7;">
-      선정 기준: 거래량 50% + Google 검색량 30% + 뉴스 언급 20%
+      선정 기준: 거래량 50% + 뉴스 버즈 30% + 시장 언급 20%
     </div>
   </div>
 

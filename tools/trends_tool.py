@@ -1,27 +1,27 @@
+import os
 import time
-from pytrends.request import TrendReq
+import finnhub
 
 
-def get_trends_scores(tickers: list[str]) -> dict[str, int]:
-    """ticker 리스트의 Google Trends 점수를 반환 (0~100)"""
-    pytrends = TrendReq(hl="en-US", tz=360)
+def get_news_buzz_scores(tickers: list[str], days: int = 7) -> dict[str, int]:
+    """
+    Finnhub 종목별 뉴스 건수를 트렌드 대용 신호로 반환합니다.
+    뉴스가 많을수록 시장 관심도가 높다고 판단합니다.
+    """
+    client = finnhub.Client(api_key=os.environ["FINNHUB_API_KEY"])
+
+    end = time.strftime("%Y-%m-%d")
+    start = time.strftime("%Y-%m-%d", time.localtime(time.time() - days * 86400))
+
     scores = {}
-
-    # pytrends는 한 번에 최대 5개 비교 가능
-    for i in range(0, len(tickers), 5):
-        batch = tickers[i:i + 5]
+    for ticker in tickers:
         try:
-            pytrends.build_payload(batch, timeframe="now 7-d", geo="US")
-            data = pytrends.interest_over_time()
-            if not data.empty:
-                for ticker in batch:
-                    if ticker in data.columns:
-                        scores[ticker] = int(data[ticker].mean())
-                    else:
-                        scores[ticker] = 0
-        except Exception:
-            for ticker in batch:
-                scores[ticker] = 0
-        time.sleep(1)  # rate limit 방지
+            news = client.company_news(ticker, _from=start, to=end)
+            scores[ticker] = len(news)
+            print(f"  [Buzz] {ticker}: 뉴스 {len(news)}건")
+        except Exception as e:
+            print(f"  [Buzz] {ticker} 오류: {e}")
+            scores[ticker] = 0
+        time.sleep(0.3)
 
     return scores

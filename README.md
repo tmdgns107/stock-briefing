@@ -78,8 +78,8 @@
 | 신호 | 소스 | 가중치 |
 |------|------|--------|
 | 거래량 순위 | Yahoo Finance Most Active | 50% |
-| Google 검색량 | pytrends (Google Trends) | 30% |
-| 뉴스 언급 빈도 | Finnhub 시장 뉴스 | 20% |
+| 뉴스 버즈 | Finnhub 종목별 뉴스 건수 | 30% |
+| 시장 언급 빈도 | Finnhub 일반 시장 뉴스 | 20% |
 
 3개 신호를 정규화 후 가중 합산 → 상위 5종목 선정
 
