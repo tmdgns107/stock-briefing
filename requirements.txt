@@ -1,0 +1,8 @@
+anthropic
+langchain
+langchain-anthropic
+yfinance
+finnhub-python
+pytrends
+requests
+python-dotenv
