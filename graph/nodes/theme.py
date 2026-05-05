@@ -5,7 +5,10 @@ import anthropic
 from config import REPORT_LANGUAGE
 
 
-def analyze_theme(report_items: list[dict]) -> dict:
+def theme_node(state: dict) -> dict:
+    print("\n[ Theme Node ] 매크로 테마 분석 중...")
+
+    report_items = state["report_items"]
     client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
     stock_summary = "\n".join([
@@ -35,7 +38,7 @@ def analyze_theme(report_items: list[dict]) -> dict:
   ]
 }}
 
-규칙: beneficiary_sectors 2개, risk_sectors 1개, watch_stocks 3개. 각 문장은 짧고 간결하게.
+규칙: beneficiary_sectors 2개, risk_sectors 1개, watch_stocks 3개.
 """.strip()
 
     message = client.messages.create(
@@ -44,29 +47,31 @@ def analyze_theme(report_items: list[dict]) -> dict:
         messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = message.content[0].text.strip()
-
-    # 코드블록 제거
-    raw = re.sub(r"^```(?:json)?\s*", "", raw)
-    raw = re.sub(r"\s*```$", "", raw)
-    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", message.content[0].text.strip())
+    raw = re.sub(r"\s*```$", "", raw).strip()
 
     try:
-        return json.loads(raw)
+        theme = json.loads(raw)
     except json.JSONDecodeError:
-        # JSON 객체 부분만 추출 시도
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group())
+                theme = json.loads(match.group())
             except json.JSONDecodeError:
-                pass
+                theme = _fallback_theme(raw)
+        else:
+            theme = _fallback_theme(raw)
 
-        print(f"[Theme Agent] JSON 파싱 실패:\n{raw}")
-        return {
-            "theme_title": "분석 중",
-            "theme_summary": "이번 주 주목받은 종목들의 테마 분석 중 오류가 발생했습니다.",
-            "beneficiary_sectors": [],
-            "risk_sectors": [],
-            "watch_stocks": [],
-        }
+    print(f"  → 테마: {theme.get('theme_title')}")
+    return {"theme": theme}
+
+
+def _fallback_theme(raw: str) -> dict:
+    print(f"[Theme Node] JSON 파싱 실패:\n{raw}")
+    return {
+        "theme_title": "분석 중",
+        "theme_summary": "이번 주 주목받은 종목들의 테마 분석 중 오류가 발생했습니다.",
+        "beneficiary_sectors": [],
+        "risk_sectors": [],
+        "watch_stocks": [],
+    }
