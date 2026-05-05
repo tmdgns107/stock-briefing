@@ -1,8 +1,10 @@
 import os
-import anthropic
+from langchain_anthropic import ChatAnthropic
+from langchain_core.messages import HumanMessage, ToolMessage
 from langgraph.types import Send
+
 from tools.stock_tool import get_stock_data
-from tools.news_tool import get_news
+from tools.langchain_tools import REPORT_TOOLS
 from config import REPORT_LANGUAGE
 
 
@@ -15,27 +17,56 @@ def dispatch_reports(state: dict) -> list[Send]:
 
 
 def report_single(state: dict) -> dict:
-    """단일 종목 AI 분석 — 병렬로 실행됩니다."""
+    """
+    LangChain Tool-calling 에이전트로 단일 종목을 분석합니다.
+    Claude가 필요한 데이터(주가, 뉴스)를 스스로 판단해 Tool을 호출합니다.
+    """
     ticker = state["ticker"]
     scores = state["scores"]
 
-    print(f"  [ Report Node ] {ticker} 분석 중...")
+    print(f"  [ Report Node ] {ticker} 분석 중 (Tool-calling Agent)...")
 
+    model = ChatAnthropic(
+        model="claude-sonnet-4-6",
+        max_tokens=1000,
+        api_key=os.environ["ANTHROPIC_API_KEY"],
+    ).bind_tools(REPORT_TOOLS)
+    tool_map = {t.name: t for t in REPORT_TOOLS}
+
+    messages = [
+        HumanMessage(content=f"""
+{ticker} 종목에 대한 투자 브리핑을 작성해주세요.
+필요한 데이터는 제공된 도구를 사용해 직접 조회하세요.
+
+최종 답변은 반드시 {REPORT_LANGUAGE}로 아래 형식만 사용하세요.
+마크다운, 표, 이모지, 제목(#), 구분선(--)을 절대 사용하지 마세요.
+각 항목은 반드시 대괄호 태그로 시작하고 1~2문장으로만 작성하세요:
+
+[주목이유] 이번 주 왜 주목받고 있는지 1~2문장.
+[핵심뉴스] 가장 중요한 뉴스 이슈 1~2문장.
+[리스크] 투자 시 주의할 점 1~2문장.
+""".strip())
+    ]
+
+    # Tool-calling 루프: Claude가 필요한 도구를 모두 호출할 때까지 반복
+    while True:
+        response = model.invoke(messages)
+        messages.append(response)
+
+        if not response.tool_calls:
+            break
+
+        for tc in response.tool_calls:
+            result = tool_map[tc["name"]].invoke(tc["args"])
+            messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+            print(f"    ↳ Tool 호출: {tc['name']}({tc['args']})")
+
+    # 이메일 렌더링용 구조화 데이터는 직접 수집 (LLM 응답과 별도)
     stock = get_stock_data(ticker)
     if "error" in stock:
         return {"report_items": [{"ticker": ticker, "error": True}]}
 
-    news = get_news(ticker)
-    prompt = _build_prompt(ticker, stock, news)
-
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=400,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    analysis = _parse_analysis(message.content[0].text)
+    analysis = _parse_analysis(response.content)
 
     return {
         "report_items": [{
@@ -47,46 +78,31 @@ def report_single(state: dict) -> dict:
     }
 
 
-def _build_prompt(ticker: str, stock: dict, news: list[dict]) -> str:
-    news_text = "\n".join(
-        [f"- [{n['source']}] {n['headline']}" for n in news]
-    ) or "관련 뉴스 없음"
-
-    fmt = lambda v, prefix="", suffix="", d=2: (
-        f"{prefix}{v:.{d}f}{suffix}" if isinstance(v, (int, float)) else "N/A"
-    )
-    roe_raw = stock.get("roe")
-    roe = f"{roe_raw * 100:.1f}%" if isinstance(roe_raw, (int, float)) else "N/A"
-
-    return f"""
-종목: {stock['name']} ({ticker}) | 섹터: {stock.get('sector', 'N/A')}
-현재가: ${stock['price']} | 주간 등락률: {'+' if stock['weekly_change_pct'] >= 0 else ''}{stock['weekly_change_pct']}%
-시가총액: {stock['market_cap']} | ROE: {roe}
-PER: {fmt(stock.get('pe_ratio'))} | Forward PER: {fmt(stock.get('forward_pe'))} | EPS: {fmt(stock.get('eps'), '$')}
-52주 고가: {fmt(stock.get('52w_high'), '$')} | 52주 저가: {fmt(stock.get('52w_low'), '$')}
-애널리스트 목표주가: {fmt(stock.get('target_price'), '$')}
-
-최근 뉴스:
-{news_text}
-
-{REPORT_LANGUAGE}로 아래 3개 항목을 각각 1~2문장으로 작성하세요.
-
-[주목이유] (이번 주 왜 주목받고 있는지)
-[핵심뉴스] (가장 중요한 뉴스 이슈)
-[리스크] (투자 시 주의할 점)
-""".strip()
-
-
 def _parse_analysis(text: str) -> dict:
+    import re
     sections = {"주목이유": "", "핵심뉴스": "", "리스크": ""}
+    # Flexible key aliases to handle spacing/emoji variations
+    key_aliases = {
+        "주목이유": ["주목이유", "주목 이유"],
+        "핵심뉴스": ["핵심뉴스", "핵심 뉴스"],
+        "리스크": ["리스크"],
+    }
     current = None
     for line in text.splitlines():
         line = line.strip()
-        for key in sections:
-            if line.startswith(f"[{key}]"):
-                current = key
-                line = line[len(f"[{key}]"):].strip()
+        # Strip leading markdown markers: ##, >, -, *, 🔍 etc.
+        clean = re.sub(r'^[#>\-\*\s🔍📰⚠️📌]+', '', line).strip()
+        matched_key = None
+        for key, aliases in key_aliases.items():
+            for alias in aliases:
+                if clean.startswith(f"[{alias}]"):
+                    matched_key = key
+                    clean = clean[len(f"[{alias}]"):].strip()
+                    break
+            if matched_key:
                 break
-        if current and line:
-            sections[current] += (" " if sections[current] else "") + line
+        if matched_key:
+            current = matched_key
+        if current and clean:
+            sections[current] += (" " if sections[current] else "") + clean
     return sections
