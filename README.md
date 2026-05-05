@@ -6,9 +6,10 @@
 
 ## 주요 기능
 
-- **AI 종목 자동 발굴** — 거래량·Google Trends·뉴스 언급 빈도를 종합해 이번 주 TOP 5 종목 자동 선정
-- **AI 분석 리포트** — Claude(Anthropic)가 주가 데이터와 뉴스를 종합해 종목별 투자 브리핑 생성
-- **자동 데이터 수집** — yfinance(주가/재무), Finnhub(뉴스), Google Trends(검색량) 멀티소스 수집
+- **AI 종목 자동 발굴** — 거래금액·펀더멘털·뉴스 버즈·언급 빈도 4가지 신호를 종합해 이번 주 TOP 5 종목 자동 선정
+- **LangChain Tool-calling 분석** — Claude가 필요한 데이터를 스스로 판단해 도구를 호출하고 종목별 투자 브리핑 생성
+- **LangGraph 병렬 오케스트레이션** — 종목별 분석을 병렬 실행, 전체 처리 시간 단축
+- **매크로 테마 분석** — 선정 종목들을 관통하는 주간 투자 테마 및 섹터 동향 자동 도출
 - **이메일 자동 발송** — 매주 토요일 오전 10시 Gmail로 HTML 리포트 발송
 - **무서버 운영** — GitHub Actions 기반, 별도 서버 없이 완전 자동화
 
@@ -21,78 +22,82 @@
               │
               ▼
         ┌─────────────┐
-        │   main.py   │  진입점
+        │   main.py   │  진입점 (LangGraph 실행)
         └──────┬──────┘
                │
                ▼
-   ┌───────────────────────────┐
-   │     Discovery Agent       │  종목 자동 발굴
-   │  (agents/discovery_agent) │
-   └──────────┬────────────────┘
-              │
-       ┌──────┼──────┐
-       │      │      │
-       ▼      ▼      ▼
-  ┌────────┐ ┌──────────────┐ ┌────────────┐
-  │ Volume │ │Google Trends │ │ News Count │  데이터 수집
-  │  Tool  │ │    Tool      │ │    Tool    │
-  │(Yahoo) │ │ (pytrends)   │ │ (Finnhub)  │
-  └────────┘ └──────────────┘ └────────────┘
-       │      │      │
-       └──────┼──────┘
-              │  가중 합산 → TOP 5 선정
-              │  (거래량 50% + 트렌드 30% + 뉴스 20%)
-              ▼
-   ┌───────────────────────┐
-   │     Report Agent      │  AI 분석 오케스트레이터
-   │  (agents/report_agent)│
-   └──────────┬────────────┘
-              │
-       ┌──────┴──────┐
-       │             │
-       ▼             ▼
- ┌───────────┐  ┌───────────┐
- │ Stock Tool│  │ News Tool │  상세 데이터 수집
- │ (yfinance)│  │ (Finnhub) │
- └───────────┘  └───────────┘
-       │             │
-       └──────┬──────┘
-              │
-              ▼
-   ┌─────────────────────┐
-   │   Claude Sonnet     │  LLM 분석
-   │  (Anthropic API)    │  — 뉴스 감성 분석
-   └──────────┬──────────┘  — 주가 흐름 해석
-              │              — 투자 브리핑 생성
-              ▼
-   ┌─────────────────────┐
-   │   Email Notifier    │  결과 발송
-   │   (Gmail SMTP)      │
-   └─────────────────────┘
+   ┌───────────────────────────────┐
+   │       Discovery Node          │  종목 자동 발굴
+   └──────────────┬────────────────┘
+                  │  4가지 신호 가중 합산 → TOP 5 선정
+       ┌──────────┼──────────┬──────────┐
+       ▼          ▼          ▼          ▼
+  ┌─────────┐ ┌────────┐ ┌───────┐ ┌─────────┐
+  │거래금액  │ │펀더멘털│ │뉴스   │ │시장 언급│
+  │(Yahoo)  │ │(PEG/ROE│ │버즈   │ │(Finnhub)│
+  │  40%    │ │ EPS)   │ │20%    │ │  10%    │
+  │         │ │  30%   │ │       │ │         │
+  └─────────┘ └────────┘ └───────┘ └─────────┘
+                  │
+       ┌──────────┼──────────┐  LangGraph Send API
+       ▼          ▼          ▼  (병렬 실행)
+  ┌─────────┐ ┌────────┐ ┌───────┐
+  │ Report  │ │ Report │ │Report │  종목별 AI 분석
+  │ Single  │ │ Single │ │Single │
+  └────┬────┘ └───┬────┘ └───┬───┘
+       │          │          │
+       │  LangChain Tool-calling Agent
+       │  Claude가 필요한 도구를 스스로 결정
+       ├──→ stock_data_tool (yfinance)
+       └──→ company_news_tool (Finnhub)
+                  │
+                  ▼  병렬 완료 후 합류
+   ┌──────────────────────────┐
+   │       Theme Node         │  매크로 테마 분석
+   │  (Claude Sonnet 4.6)     │  섹터 동향 · 수혜/위험 종목
+   └──────────────┬───────────┘
+                  │
+                  ▼
+   ┌──────────────────────────┐
+   │       Notify Node        │  HTML 이메일 생성 · 발송
+   │      (Gmail SMTP)        │
+   └──────────────────────────┘
 ```
 
 ### 처리 흐름
 
-**1단계 — 종목 발굴 (Discovery Agent)**
+**1단계 — 종목 발굴 (Discovery Node)**
 
 | 신호 | 소스 | 가중치 |
 |------|------|--------|
-| 거래량 순위 | Yahoo Finance Most Active | 50% |
-| 뉴스 버즈 | Finnhub 종목별 뉴스 건수 | 30% |
-| 시장 언급 빈도 | Finnhub 일반 시장 뉴스 | 20% |
+| 거래금액 순위 | Yahoo Finance Most Active | 40% |
+| 펀더멘털 점수 | PEG(40%) + ROE(30%) + EPS성장(30%) | 30% |
+| 뉴스 버즈 | Finnhub 종목별 뉴스 건수 | 20% |
+| 시장 언급 빈도 | Finnhub 일반 시장 뉴스 | 10% |
 
-3개 신호를 정규화 후 가중 합산 → 상위 5종목 선정
+- 시가총액 $500B 이하 종목만 대상 (config에서 조정 가능)
+- 4개 신호를 정규화 후 가중 합산 → 상위 5종목 선정
 
-**2단계 — AI 분석 (Report Agent)**
+**2단계 — AI 분석 (Report Single Node × 병렬)**
 
-선정된 종목별로:
-1. yfinance로 현재가·등락률·PER·52주 고저가 수집
-2. Finnhub으로 최근 뉴스 헤드라인 5건 수집
-3. Claude가 데이터를 종합해 3~5문장 투자 브리핑 생성
+LangChain Tool-calling 에이전트가 종목별로 병렬 실행됩니다.
 
-**3단계 — 발송**
+1. Claude가 필요한 도구를 스스로 판단해 호출 (`stock_data_tool`, `company_news_tool`)
+2. 수집된 데이터를 바탕으로 3개 섹션 브리핑 생성
+   - `[주목이유]` — 이번 주 왜 주목받고 있는지
+   - `[핵심뉴스]` — 가장 중요한 뉴스 이슈
+   - `[리스크]` — 투자 시 주의할 점
 
-전 종목 리포트를 HTML 이메일로 조합 후 Gmail 발송
+**3단계 — 테마 분석 (Theme Node)**
+
+전 종목 데이터를 종합해 Claude가 주간 매크로 테마를 도출합니다.
+- 이번 주 시장을 관통하는 핵심 투자 테마
+- 수혜 섹터 / 위험 섹터
+- 주목할 종목 추천 이유
+
+**4단계 — 발송 (Notify Node)**
+
+전 종목 리포트 + 테마 분석을 HTML 이메일로 조합 후 Gmail 발송
 
 ---
 
@@ -100,9 +105,11 @@
 
 | 구분 | 기술 |
 |------|------|
-| AI 모델 | Claude Sonnet (Anthropic) |
-| 종목 발굴 | Yahoo Finance, pytrends, Finnhub |
-| 주가 데이터 | yfinance |
+| AI 모델 | Claude Sonnet 4.6 (Anthropic) |
+| LLM 프레임워크 | LangChain (`langchain_anthropic`, `@tool`) |
+| AI 오케스트레이션 | LangGraph (StateGraph, Send API) |
+| 종목 발굴 | Yahoo Finance, Finnhub |
+| 주가/재무 데이터 | yfinance |
 | 뉴스 데이터 | Finnhub API |
 | 자동화 | GitHub Actions |
 | 알림 | Gmail SMTP |
@@ -115,19 +122,26 @@
 ```
 stock-briefing/
 ├── .github/workflows/
-│   └── daily_report.yml      # GitHub Actions 스케줄러 (매주 토요일 10:00 KST)
-├── agents/
-│   ├── discovery_agent.py    # 종목 자동 발굴 (멀티 신호 가중 합산)
-│   └── report_agent.py       # AI 분석 오케스트레이터
+│   └── daily_report.yml        # GitHub Actions 스케줄러 (매주 토요일 10:00 KST)
+├── graph/
+│   ├── state.py                # LangGraph 상태 정의 (BriefingState)
+│   ├── workflow.py             # 그래프 빌드 (노드 연결)
+│   └── nodes/
+│       ├── discovery.py        # 종목 자동 발굴 (멀티 신호 가중 합산)
+│       ├── report.py           # LangChain Tool-calling 분석 에이전트
+│       ├── theme.py            # 매크로 테마 분석
+│       └── notify.py           # 이메일 발송
 ├── tools/
-│   ├── volume_tool.py        # Yahoo Finance 거래량 상위 종목
-│   ├── trends_tool.py        # Google Trends 검색량
-│   ├── stock_tool.py         # yfinance 주가/재무 데이터
-│   └── news_tool.py          # Finnhub 뉴스 수집 + 언급 카운팅
+│   ├── langchain_tools.py      # LangChain @tool 래퍼 (Claude 도구 호출용)
+│   ├── volume_tool.py          # Yahoo Finance 거래금액 상위 종목
+│   ├── trends_tool.py          # Finnhub 뉴스 버즈 점수
+│   ├── fundamental_tool.py     # PEG/ROE/EPS 펀더멘털 점수
+│   ├── stock_tool.py           # yfinance 주가/재무 데이터
+│   └── news_tool.py            # Finnhub 뉴스 수집 + 언급 카운팅
 ├── notifier/
-│   └── email.py              # Gmail 이메일 발송
-├── config.py                 # TOP_N 등 설정
-├── main.py                   # 진입점
+│   └── email.py                # Gmail HTML 이메일 발송
+├── config.py                   # TOP_N, MAX_MARKET_CAP 등 설정
+├── main.py                     # 진입점
 └── requirements.txt
 ```
 
@@ -138,6 +152,8 @@ stock-briefing/
 ### 1. 의존성 설치
 
 ```bash
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
@@ -161,17 +177,23 @@ RECIPIENT_EMAIL=recipient@gmail.com
 python main.py
 ```
 
-실행 시 콘솔에서 종목 선정 점수를 확인할 수 있습니다:
+실행 시 콘솔에서 진행 상황을 확인할 수 있습니다:
 
 ```
-[ Discovery ] 이번 주 주목 종목 선정 중...
-[ 1/3 ] 거래량 상위 종목 수집 중...
-[ 2/3 ] Google Trends 점수 수집 중...
-[ 3/3 ] 뉴스 언급 빈도 수집 중...
+[ Discovery Node ] 거래금액 상위 종목 수집 중...
+[ Discovery Node ] 펀더멘털 점수 수집 중...
+[ Discovery Node ] 뉴스 버즈 수집 중...
+[ Discovery Node ] 시장 뉴스 언급 빈도 수집 중...
 
-이번 주 선정 종목: NVDA, TSLA, AAPL, META, AMD
-  NVDA: 종합점수 91.2 (거래량 100 / 트렌드 87 / 뉴스 60)
-  TSLA: 종합점수 78.4 (거래량 90 / 트렌드 72 / 뉴스 40)
+[ Discovery Node ] 선정 완료: PLTR, NVDA, TSLA, META, AMD
+  PLTR: 종합 88.3 (거래금액 100 / 펀더멘털 72 / 버즈 85 / 언급 60)
+  NVDA: 종합 81.2 (거래금액 95 / 펀더멘털 100 / 버즈 40 / 언급 50)
+  ...
+
+  [ Report Node ] PLTR 분석 중 (Tool-calling Agent)...
+    ↳ Tool 호출: stock_data_tool({'ticker': 'PLTR'})
+    ↳ Tool 호출: company_news_tool({'ticker': 'PLTR'})
+  [ Report Node ] NVDA 분석 중 (Tool-calling Agent)...
   ...
 ```
 
@@ -195,32 +217,12 @@ GitHub 레포지토리 → Settings → Secrets and variables → Actions에서 
 
 ## 설정 변경
 
-[config.py](config.py)에서 분석 종목 수를 조정할 수 있습니다:
+[config.py](config.py)에서 주요 파라미터를 조정할 수 있습니다:
 
 ```python
-TOP_N = 5  # 최종 분석할 종목 수 (늘릴수록 API 비용 증가)
-```
-
----
-
-## 리포트 예시
-
-```
-📈 미국주식 주간 브리핑 — 2026-05-04
-
-이번 주 선정 종목: NVDA, TSLA, AAPL, META, AMD
-선정 기준: 거래량 · Google 검색량 · 뉴스 언급 빈도 종합
-
-### NVIDIA (NVDA)
-$875.40 (+3.2%)
-
-이번 주 NVIDIA는 데이터센터 수요 확대 기대감에 강한 상승세를 보였습니다.
-블랙웰 GPU 출하량 증가 소식이 주가를 견인했으며, 애널리스트들의 목표주가
-상향 조정이 이어졌습니다. 단기 과열 우려도 있으나 AI 인프라 수요는
-지속될 것으로 전망됩니다.
-
----
-...
+TOP_N = 5                           # 최종 분석할 종목 수 (늘릴수록 API 비용 증가)
+MAX_MARKET_CAP = 500_000_000_000    # 시총 상한선 — $500B 이하 종목만 선정
+REPORT_LANGUAGE = "Korean"          # 리포트 언어
 ```
 
 ---
