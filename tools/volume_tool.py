@@ -1,7 +1,6 @@
 import requests
 import yfinance as yf
-
-MAX_MARKET_CAP = 500_000_000_000  # $500B
+from config import MAX_MARKET_CAP
 
 
 def get_most_active_by_dollar_volume(count: int = 20) -> list[str]:

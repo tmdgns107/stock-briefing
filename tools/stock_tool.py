@@ -43,6 +43,7 @@ def get_stock_data(ticker: str) -> dict:
         "pe_ratio": info.get("trailingPE"),
         "forward_pe": info.get("forwardPE"),
         "eps": info.get("trailingEps"),
+        "roe": info.get("returnOnEquity"),
         "52w_high": info.get("fiftyTwoWeekHigh"),
         "52w_low": info.get("fiftyTwoWeekLow"),
         "target_price": info.get("targetMeanPrice"),

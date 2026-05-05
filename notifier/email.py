@@ -35,6 +35,8 @@ def _stock_card(item: dict) -> str:
     pe = _fmt(s.get("pe_ratio"), decimals=1)
     fpe = _fmt(s.get("forward_pe"), decimals=1)
     eps = _fmt(s.get("eps"), "$", decimals=2)
+    roe_raw = s.get("roe")
+    roe = f"{roe_raw * 100:.1f}%" if isinstance(roe_raw, (int, float)) else "N/A"
     high = _fmt(s.get("52w_high"), "$", decimals=2)
     low = _fmt(s.get("52w_low"), "$", decimals=2)
     target = _fmt(s.get("target_price"), "$", decimals=2)
@@ -68,14 +70,16 @@ def _stock_card(item: dict) -> str:
       <td style="padding:8px 12px; font-weight:600;">{eps}</td>
     </tr>
     <tr style="background:#f7fafc;">
+      <td style="padding:8px 12px; color:#718096;">ROE</td>
+      <td style="padding:8px 12px; font-weight:600;">{roe}</td>
+      <td style="padding:8px 12px; color:#718096;">목표주가</td>
+      <td style="padding:8px 12px; font-weight:600;">{target}</td>
+    </tr>
+    <tr style="background:#f7fafc;">
       <td style="padding:8px 12px; color:#718096;">52주 고가</td>
       <td style="padding:8px 12px; font-weight:600;">{high}</td>
       <td style="padding:8px 12px; color:#718096;">52주 저가</td>
       <td style="padding:8px 12px; font-weight:600;">{low}</td>
-    </tr>
-    <tr>
-      <td style="padding:8px 12px; color:#718096;">목표주가</td>
-      <td style="padding:8px 12px; font-weight:600;" colspan="3">{target}</td>
     </tr>
   </table>
 
