@@ -1,7 +1,10 @@
 anthropic
 langchain
 langchain-anthropic
+langgraph
 yfinance
 finnhub-python
 requests
 python-dotenv
+chromadb
+sentence-transformers

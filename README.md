@@ -8,6 +8,7 @@
 
 - **AI 종목 자동 발굴** — 거래금액·펀더멘털·뉴스 버즈·언급 빈도 4가지 신호를 종합해 이번 주 TOP 5 종목 자동 선정
 - **LangChain Tool-calling 분석** — Claude가 필요한 데이터를 스스로 판단해 도구를 호출하고 종목별 투자 브리핑 생성
+- **RAG 기반 공시 분석** — SEC 10-Q(분기 보고서) MD&A 섹션을 ChromaDB에 벡터 저장, Claude가 의미 기반 검색으로 공시 근거 활용
 - **LangGraph 병렬 오케스트레이션** — 종목별 분석을 병렬 실행, 전체 처리 시간 단축
 - **매크로 테마 분석** — 선정 종목들을 관통하는 주간 투자 테마 및 섹터 동향 자동 도출
 - **이메일 자동 발송** — 매주 토요일 오전 10시 Gmail로 HTML 리포트 발송
@@ -39,6 +40,12 @@
   │         │ │  30%   │ │       │ │         │
   └─────────┘ └────────┘ └───────┘ └─────────┘
                   │
+                  ▼
+   ┌──────────────────────────┐
+   │        RAG Node          │  SEC 10-Q 공시 수집 · 벡터 저장
+   │  (ChromaDB + 임베딩)     │  MD&A 섹션 → ChromaDB 인메모리
+   └──────────────┬───────────┘
+                  │
        ┌──────────┼──────────┐  LangGraph Send API
        ▼          ▼          ▼  (병렬 실행)
   ┌─────────┐ ┌────────┐ ┌───────┐
@@ -49,7 +56,8 @@
        │  LangChain Tool-calling Agent
        │  Claude가 필요한 도구를 스스로 결정
        ├──→ stock_data_tool (yfinance)
-       └──→ company_news_tool (Finnhub)
+       ├──→ company_news_tool (Finnhub)
+       └──→ sec_filing_tool (ChromaDB RAG)
                   │
                   ▼  병렬 완료 후 합류
    ┌──────────────────────────┐
@@ -108,6 +116,7 @@ LangChain Tool-calling 에이전트가 종목별로 병렬 실행됩니다.
 | AI 모델 | Claude Sonnet 4.6 (Anthropic) |
 | LLM 프레임워크 | LangChain (`langchain_anthropic`, `@tool`) |
 | AI 오케스트레이션 | LangGraph (StateGraph, Send API) |
+| RAG | ChromaDB + sentence-transformers (SEC 10-Q 공시) |
 | 종목 발굴 | Yahoo Finance, Finnhub |
 | 주가/재무 데이터 | yfinance |
 | 뉴스 데이터 | Finnhub API |
@@ -128,11 +137,13 @@ stock-briefing/
 │   ├── workflow.py             # 그래프 빌드 (노드 연결)
 │   └── nodes/
 │       ├── discovery.py        # 종목 자동 발굴 (멀티 신호 가중 합산)
+│       ├── rag.py              # SEC 10-Q 수집 및 ChromaDB 벡터 저장
 │       ├── report.py           # LangChain Tool-calling 분석 에이전트
 │       ├── theme.py            # 매크로 테마 분석
 │       └── notify.py           # 이메일 발송
 ├── tools/
 │   ├── langchain_tools.py      # LangChain @tool 래퍼 (Claude 도구 호출용)
+│   ├── rag_tool.py             # SEC EDGAR 10-Q 수집 + ChromaDB 벡터 저장/검색
 │   ├── volume_tool.py          # Yahoo Finance 거래금액 상위 종목
 │   ├── trends_tool.py          # Finnhub 뉴스 버즈 점수
 │   ├── fundamental_tool.py     # PEG/ROE/EPS 펀더멘털 점수

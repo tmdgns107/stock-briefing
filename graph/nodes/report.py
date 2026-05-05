@@ -38,6 +38,11 @@ def report_single(state: dict) -> dict:
 {ticker} 종목에 대한 투자 브리핑을 작성해주세요.
 필요한 데이터는 제공된 도구를 사용해 직접 조회하세요.
 
+사용 가능한 도구:
+- stock_data_tool: 주가, PER, ROE 등 기본 데이터
+- company_news_tool: 최근 뉴스 헤드라인
+- sec_filing_tool: SEC 10-Q 공시 기반 실적·리스크 정보 (예: query="revenue growth risk factors")
+
 최종 답변은 반드시 {REPORT_LANGUAGE}로 아래 형식만 사용하세요.
 마크다운, 표, 이모지, 제목(#), 구분선(--)을 절대 사용하지 마세요.
 각 항목은 반드시 대괄호 태그로 시작하고 1~2문장으로만 작성하세요:

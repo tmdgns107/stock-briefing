@@ -2,6 +2,7 @@ import json
 from langchain_core.tools import tool
 from tools.stock_tool import get_stock_data
 from tools.news_tool import get_news
+from tools.rag_tool import search as rag_search
 
 
 @tool
@@ -28,4 +29,13 @@ def company_news_tool(ticker: str) -> str:
     ])
 
 
-REPORT_TOOLS = [stock_data_tool, company_news_tool]
+@tool
+def sec_filing_tool(ticker: str, query: str) -> str:
+    """
+    종목의 최신 SEC 10-Q 공시(분기 보고서) MD&A 섹션에서 query와 관련된 내용을 검색합니다.
+    실적, 리스크 팩터, 사업 현황 등 공시 기반 정보가 필요할 때 사용하세요.
+    """
+    return rag_search(ticker, query)
+
+
+REPORT_TOOLS = [stock_data_tool, company_news_tool, sec_filing_tool]
