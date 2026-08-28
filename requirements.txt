@@ -2,10 +2,12 @@ anthropic
 langchain
 langchain-anthropic
 langgraph
+langchain-text-splitters
 yfinance
 finnhub-python
 requests
 python-dotenv
+pydantic
 chromadb
 sentence-transformers
 fastapi

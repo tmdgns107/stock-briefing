@@ -8,3 +8,4 @@ class BriefingState(TypedDict):
     scores: dict
     report_items: Annotated[list[dict], operator.add]  # 병렬 노드 결과 누적
     theme: dict
+    verifications: dict                        # 티커 → 공시 근거 검증 결과

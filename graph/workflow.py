@@ -5,6 +5,7 @@ from graph.state import BriefingState
 from graph.nodes.discovery import discovery_node
 from graph.nodes.rag import rag_node
 from graph.nodes.report import dispatch_reports, report_single
+from graph.nodes.verify import verify_node
 from graph.nodes.theme import theme_node
 from graph.nodes.notify import notify_node
 
@@ -15,6 +16,7 @@ def build_graph():
     graph.add_node("discovery", discovery_node)
     graph.add_node("rag", rag_node)
     graph.add_node("report_single", report_single)
+    graph.add_node("verify", verify_node)
     graph.add_node("theme", theme_node)
     graph.add_node("notify", notify_node)
 
@@ -24,8 +26,9 @@ def build_graph():
     # rag 완료 후 종목별 report_single 병렬 분배
     graph.add_conditional_edges("rag", dispatch_reports, ["report_single"])
 
-    # 모든 report_single 완료 후 theme으로 합류
-    graph.add_edge("report_single", "theme")
+    # 모든 report_single 완료 후 verify로 합류 → theme
+    graph.add_edge("report_single", "verify")
+    graph.add_edge("verify", "theme")
 
     graph.add_edge("theme", "notify")
     graph.add_edge("notify", END)

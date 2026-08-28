@@ -13,6 +13,7 @@ def run_briefing() -> dict:
         "scores": {},
         "report_items": [],
         "theme": {},
+        "verifications": {},
     })
 
 
