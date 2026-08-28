@@ -9,6 +9,7 @@
 - **AI 종목 자동 발굴** — 거래금액·펀더멘털·뉴스 버즈·언급 빈도 4가지 신호를 종합해 이번 주 TOP 5 종목 자동 선정
 - **LangChain Tool-calling 분석** — Claude가 필요한 데이터를 스스로 판단해 도구를 호출하고 종목별 투자 브리핑 생성
 - **RAG 기반 공시 분석** — SEC 10-Q(분기 보고서) MD&A 섹션을 ChromaDB에 벡터 저장, Claude가 의미 기반 검색으로 공시 근거 활용
+- **공시 근거 교차 검증** — 생성된 리포트의 리스크 주장이 실제 SEC 공시로 뒷받침되는지 Claude가 재판정 (할루시네이션 탐지)
 - **LangGraph 병렬 오케스트레이션** — 종목별 분석을 병렬 실행, 전체 처리 시간 단축
 - **매크로 테마 분석** — 선정 종목들을 관통하는 주간 투자 테마 및 섹터 동향 자동 도출
 - **이메일 자동 발송** — 매주 토요일 오전 10시 Gmail로 HTML 리포트 발송
@@ -34,9 +35,9 @@
        ┌──────────┼──────────┬──────────┐
        ▼          ▼          ▼          ▼
   ┌─────────┐ ┌────────┐ ┌───────┐ ┌─────────┐
-  │거래금액  │ │펀더멘털│ │뉴스   │ │시장 언급│
-  │(Yahoo)  │ │(PEG/ROE│ │버즈   │ │(Finnhub)│
-  │  40%    │ │ EPS)   │ │20%    │ │  10%    │
+  │거래금액   │ │ 펀더멘털 │ │  뉴스   │ │시장 언급│
+  │(Yahoo)  │ │(PEG/ROE│ │  버즈  │ │(Finnhub)│
+  │  40%    │ │ EPS)   │ │  20%  │ │  10%    │
   │         │ │  30%   │ │       │ │         │
   └─────────┘ └────────┘ └───────┘ └─────────┘
                   │
@@ -60,6 +61,12 @@
        └──→ sec_filing_tool (ChromaDB RAG)
                   │
                   ▼  병렬 완료 후 합류
+   ┌──────────────────────────┐
+   │       Verify Node        │  공시 근거 교차 검증
+   │    (Claude Opus 5)       │  리스크 주장 ↔ RAG 근거 대조
+   └──────────────┬───────────┘  → supported / 근거 부족 판정
+                  │
+                  ▼
    ┌──────────────────────────┐
    │       Theme Node         │  매크로 테마 분석
    │  (Claude Sonnet 4.6)     │  섹터 동향 · 수혜/위험 종목
@@ -90,20 +97,30 @@
 
 LangChain Tool-calling 에이전트가 종목별로 병렬 실행됩니다.
 
-1. Claude가 필요한 도구를 스스로 판단해 호출 (`stock_data_tool`, `company_news_tool`)
+1. Claude가 필요한 도구를 스스로 판단해 호출 (`stock_data_tool`, `company_news_tool`, `sec_filing_tool`)
 2. 수집된 데이터를 바탕으로 3개 섹션 브리핑 생성
    - `[주목이유]` — 이번 주 왜 주목받고 있는지
    - `[핵심뉴스]` — 가장 중요한 뉴스 이슈
    - `[리스크]` — 투자 시 주의할 점
 
-**3단계 — 테마 분석 (Theme Node)**
+**3단계 — 공시 근거 검증 (Verify Node)**
+
+병렬 분석이 모두 끝난 뒤 한 번 실행되며, 각 종목의 `[리스크]` 주장을 검증합니다.
+
+1. 주장 문장을 질의로 삼아 해당 종목의 10-Q 청크를 RAG로 재검색 (상위 8개)
+2. Claude가 "주장이 공시 근거로 뒷받침되는가"를 판정
+3. 결과를 Pydantic 스키마(구조화 출력)로 받아 `state["verifications"]`에 저장
+
+공시에 근거가 없는 주장은 `supported=false`로 표시되어, LLM이 지어낸 내용을 걸러낼 수 있습니다.
+
+**4단계 — 테마 분석 (Theme Node)**
 
 전 종목 데이터를 종합해 Claude가 주간 매크로 테마를 도출합니다.
 - 이번 주 시장을 관통하는 핵심 투자 테마
 - 수혜 섹터 / 위험 섹터
 - 주목할 종목 추천 이유
 
-**4단계 — 발송 (Notify Node)**
+**5단계 — 발송 (Notify Node)**
 
 전 종목 리포트 + 테마 분석을 HTML 이메일로 조합 후 Gmail 발송
 
@@ -113,10 +130,11 @@ LangChain Tool-calling 에이전트가 종목별로 병렬 실행됩니다.
 
 | 구분 | 기술 |
 |------|------|
-| AI 모델 | Claude Sonnet 4.6 (Anthropic) |
+| AI 모델 | Claude Opus 5 (검증) / Claude Sonnet 4.6 (분석·테마) |
 | LLM 프레임워크 | LangChain (`langchain_anthropic`, `@tool`) |
 | AI 오케스트레이션 | LangGraph (StateGraph, Send API) |
 | RAG | ChromaDB + sentence-transformers (SEC 10-Q 공시) |
+| 출력 검증 | Anthropic 구조화 출력 (`messages.parse` + Pydantic) |
 | 종목 발굴 | Yahoo Finance, Finnhub |
 | 주가/재무 데이터 | yfinance |
 | 뉴스 데이터 | Finnhub API |
@@ -139,6 +157,7 @@ stock-briefing/
 │       ├── discovery.py        # 종목 자동 발굴 (멀티 신호 가중 합산)
 │       ├── rag.py              # SEC 10-Q 수집 및 ChromaDB 벡터 저장
 │       ├── report.py           # LangChain Tool-calling 분석 에이전트
+│       ├── verify.py           # 공시 근거 교차 검증 (LLM 판정)
 │       ├── theme.py            # 매크로 테마 분석
 │       └── notify.py           # 이메일 발송
 ├── tools/
@@ -151,7 +170,7 @@ stock-briefing/
 │   └── news_tool.py            # Finnhub 뉴스 수집 + 언급 카운팅
 ├── notifier/
 │   └── email.py                # Gmail HTML 이메일 발송
-├── config.py                   # TOP_N, MAX_MARKET_CAP 등 설정
+├── config.py                   # TOP_N, MAX_MARKET_CAP, LLM_MODEL 등 설정
 ├── main.py                     # 진입점
 └── requirements.txt
 ```
@@ -206,6 +225,17 @@ python main.py
     ↳ Tool 호출: company_news_tool({'ticker': 'PLTR'})
   [ Report Node ] NVDA 분석 중 (Tool-calling Agent)...
   ...
+
+[ Verify Node ] 리포트 근거 검증 중...
+  PLTR: 근거 확인 — 공시 위험요인에 매출 성장 지속 불확실성이 명시되어 주장을 뒷받침합니다.
+  NVDA: 근거 부족 — 제시된 공시 근거에 해당 리스크를 뒷받침하는 내용이 없습니다.
+  ...
+
+[ Theme Node ] 매크로 테마 분석 중...
+  → 테마: AI 인프라 강세
+
+[ Notify Node ] 이메일 발송 중...
+이메일 발송 완료 → recipient@gmail.com
 ```
 
 ### 4. GitHub Actions 설정
@@ -234,7 +264,11 @@ GitHub 레포지토리 → Settings → Secrets and variables → Actions에서 
 TOP_N = 5                           # 최종 분석할 종목 수 (늘릴수록 API 비용 증가)
 MAX_MARKET_CAP = 500_000_000_000    # 시총 상한선 — $500B 이하 종목만 선정
 REPORT_LANGUAGE = "Korean"          # 리포트 언어
+LLM_MODEL = "claude-opus-5"         # Verify 노드가 사용하는 모델
 ```
+
+> `report.py` / `theme.py`는 아직 `claude-sonnet-4-6`을 직접 지정합니다.
+> 전체를 한 모델로 통일하려면 두 파일의 모델 문자열을 `LLM_MODEL` 참조로 바꾸면 됩니다.
 
 ---
 
