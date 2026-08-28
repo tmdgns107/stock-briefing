@@ -6,7 +6,7 @@
 
 ## 주요 기능
 
-- **AI 종목 자동 발굴** — 거래대금·펀더멘털·뉴스 버즈 3가지 신호를 종합해 이번 주 TOP 5 종목 자동 선정
+- **AI 종목 자동 발굴** — 거래대금·펀더멘털·뉴스 급증 3가지 신호를 종합해 TOP 5 선정, 섹터 편중 방지 적용
 - **LangChain Tool-calling 분석** — Claude가 필요한 데이터를 스스로 판단해 도구를 호출하고 종목별 투자 브리핑 생성
 - **RAG 기반 공시 분석** — SEC 10-Q(분기 보고서) MD&A 섹션을 ChromaDB에 벡터 저장, Claude가 의미 기반 검색으로 공시 근거 활용
 - **공시 근거 교차 검증** — 생성된 리포트의 리스크 주장이 실제 SEC 공시로 뒷받침되는지 Claude가 재판정 (할루시네이션 탐지)
@@ -36,11 +36,12 @@
        ┌──────────┼──────────┐
        ▼          ▼          ▼
   ┌─────────┐ ┌────────┐ ┌───────┐
-  │거래대금   │ │ 펀더멘털 │ │  뉴스   │
-  │(Yahoo)  │ │(PEG/ROE│ │  버즈  │
+  │거래대금   │ │ 펀더멘털 │ │뉴스 급증│
+  │(Yahoo)  │ │(PEG/ROE│ │평소 대비│
   │  45%    │ │ EPS)   │ │  20%  │
-  │         │ │  35%   │ │       │
+  │         │ │  35%   │ │  배수  │
   └─────────┘ └────────┘ └───────┘
+                  │  섹터당 최대 2종목
                   │
                   ▼
    ┌──────────────────────────┐
@@ -88,10 +89,11 @@
 |------|------|--------|
 | 거래대금 순위 | Yahoo Finance Most Active | 45% |
 | 펀더멘털 점수 | PEG(40%) + ROE(30%) + EPS성장(30%) | 35% |
-| 뉴스 버즈 | Finnhub 종목별 뉴스 건수 | 20% |
+| 뉴스 급증 배수 | 이번 주 뉴스량 ÷ 직전 4주 평균 (Finnhub) | 20% |
 
 - 후보 250종목(Yahoo 최대치)을 받아 **시총 $2B ~ $500B** 구간만 대상 (config에서 조정 가능)
 - 3개 신호를 정규화 후 가중 합산 → 상위 5종목 선정
+- **섹터당 최대 2종목** 제약으로 편중 방지 (제약으로 자리가 남으면 점수순 보충)
 
 **2단계 — AI 분석 (Report Single Node × 병렬)**
 
@@ -164,7 +166,7 @@ stock-briefing/
 │   ├── langchain_tools.py      # LangChain @tool 래퍼 (Claude 도구 호출용)
 │   ├── rag_tool.py             # SEC EDGAR 10-Q 수집 + ChromaDB 벡터 저장/검색
 │   ├── volume_tool.py          # Yahoo 스크리너 → 시총 필터 → 거래대금 정렬
-│   ├── trends_tool.py          # Finnhub 뉴스 버즈 점수
+│   ├── trends_tool.py          # 평소 대비 뉴스 급증 배수
 │   ├── fundamental_tool.py     # PEG/ROE/EPS 펀더멘털 점수
 │   ├── stock_tool.py           # yfinance 주가/재무 데이터
 │   └── news_tool.py            # Finnhub 종목 뉴스 수집
@@ -213,11 +215,14 @@ python main.py
 [ Discovery Node ] 거래대금 상위 종목 수집 중...
   [Volume] 후보 250개 → 시총 필터 통과 232개 (상한 초과 18 / 하한 미달 0 / 데이터 없음 0)
 [ Discovery Node ] 펀더멘털 점수 수집 중...
-[ Discovery Node ] 뉴스 버즈 수집 중...
+[ Discovery Node ] 뉴스 버즈 수집 중 (평소 대비 배수)...
+  [Buzz] CRM: 1.65배 (이번주 135건 / 평소 81.8건) [135, 42, 81, 93, 111]
+  섹터 제한으로 제외: SNDK(Technology), PLTR(Technology), ORCL(Technology)
+  섹터 분포: Technology 2 / Communication Services 1 / Industrials 1 / Financial Services 1
 
-[ Discovery Node ] 선정 완료: CRM, SNDK, MRVL, PLTR, ORCL
-  CRM: 종합 82.6 (거래대금 65 / 펀더멘털 95 / 버즈 100)
-  SNDK: 종합 77.2 (거래대금 100 / 펀더멘털 65 / 버즈 47)
+[ Discovery Node ] 선정 완료: CRM, MRVL, NBIS, BE, HOOD
+  CRM: 종합 82.4 (거래대금 65 / 펀더멘털 95 / 버즈 99) [Technology]
+  MRVL: 종합 73.4 (거래대금 90 / 펀더멘털 55 / 버즈 68) [Technology]
   ...
 
   [ Report Node ] PLTR 분석 중 (Tool-calling Agent)...

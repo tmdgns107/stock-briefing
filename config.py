@@ -7,5 +7,7 @@ CANDIDATE_POOL = 250                    # 스크리너에서 받아올 후보 �
 # 선정 신호 가중치 (합 1.0)
 WEIGHT_VOLUME = 0.45                    # 거래대금
 WEIGHT_FUNDAMENTAL = 0.35               # PEG·ROE·EPS 성장
-WEIGHT_BUZZ = 0.20                      # 종목 뉴스 건수
+WEIGHT_BUZZ = 0.20                      # 뉴스 급증 배수 (평소 대비)
+
+MAX_PER_SECTOR = 2                      # 한 섹터에서 선정할 최대 종목 수 (편중 방지)
 LLM_MODEL = "claude-opus-5"             # 노드에서 공용으로 쓰는 Claude 모델

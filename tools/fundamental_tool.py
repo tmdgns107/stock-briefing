@@ -34,15 +34,24 @@ def _eps_growth_score(growth) -> float:
     return _clamp(pct * 2)
 
 
-def get_fundamental_scores(tickers: list[str]) -> dict[str, float]:
+def get_fundamental_scores(
+    tickers: list[str],
+) -> tuple[dict[str, float], dict[str, str]]:
     """
-    PEG(40%) + ROE(30%) + EPS 성장률(30%) 가중 합산으로 펀더멘털 점수를 반환합니다.
+    (펀더멘털 점수, 섹터) 를 함께 반환합니다.
+
+    PEG(40%) + ROE(30%) + EPS 성장률(30%) 가중 합산.
+    섹터는 어차피 조회하는 .info 에 들어 있어 추가 API 비용이 없으므로,
+    섹터 편중 방지용으로 같이 꺼내 옵니다.
     """
     scores = {}
+    sectors = {}
 
     for ticker in tickers:
         try:
             info = yf.Ticker(ticker).info
+
+            sectors[ticker] = info.get("sector") or "기타"
 
             peg = info.get("pegRatio")
             roe = info.get("returnOnEquity")
@@ -64,5 +73,6 @@ def get_fundamental_scores(tickers: list[str]) -> dict[str, float]:
         except Exception as e:
             print(f"  [Fundamental] {ticker} 오류: {e}")
             scores[ticker] = 50.0  # 데이터 없으면 중립
+            sectors.setdefault(ticker, "기타")
 
-    return scores
+    return scores, sectors
