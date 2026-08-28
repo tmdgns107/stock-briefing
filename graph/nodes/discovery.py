@@ -1,12 +1,11 @@
 from tools.volume_tool import get_most_active_by_dollar_volume
-from tools.news_tool import get_market_news_mentions
 from tools.trends_tool import get_news_buzz_scores
 from tools.fundamental_tool import get_fundamental_scores
-from config import TOP_N
+from config import TOP_N, WEIGHT_VOLUME, WEIGHT_FUNDAMENTAL, WEIGHT_BUZZ
 
 
 def discovery_node(state: dict) -> dict:
-    print("[ Discovery Node ] 거래금액 상위 종목 수집 중...")
+    print("[ Discovery Node ] 거래대금 상위 종목 수집 중...")
     active_tickers = get_most_active_by_dollar_volume(count=20)
 
     print("\n[ Discovery Node ] 펀더멘털 점수 수집 중...")
@@ -14,9 +13,6 @@ def discovery_node(state: dict) -> dict:
 
     print("\n[ Discovery Node ] 뉴스 버즈 수집 중...")
     buzz_scores = get_news_buzz_scores(active_tickers)
-
-    print("\n[ Discovery Node ] 시장 뉴스 언급 빈도 수집 중...")
-    mention_scores = get_market_news_mentions(active_tickers)
 
     volume_scores = {ticker: (20 - i) for i, ticker in enumerate(active_tickers)}
 
@@ -27,14 +23,12 @@ def discovery_node(state: dict) -> dict:
     vol_norm = normalize(volume_scores)
     fund_norm = fundamental_scores
     buzz_norm = normalize(buzz_scores)
-    mention_norm = normalize(mention_scores)
 
     combined = {
         ticker: (
-            vol_norm.get(ticker, 0) * 0.4
-            + fund_norm.get(ticker, 50) * 0.3
-            + buzz_norm.get(ticker, 0) * 0.2
-            + mention_norm.get(ticker, 0) * 0.1
+            vol_norm.get(ticker, 0) * WEIGHT_VOLUME
+            + fund_norm.get(ticker, 50) * WEIGHT_FUNDAMENTAL
+            + buzz_norm.get(ticker, 0) * WEIGHT_BUZZ
         )
         for ticker in active_tickers
     }
@@ -47,7 +41,6 @@ def discovery_node(state: dict) -> dict:
             "volume": round(vol_norm.get(ticker, 0), 1),
             "fundamental": round(fund_norm.get(ticker, 50), 1),
             "buzz": round(buzz_norm.get(ticker, 0), 1),
-            "mention": round(mention_norm.get(ticker, 0), 1),
         }
         for ticker in top_tickers
     }
@@ -55,6 +48,6 @@ def discovery_node(state: dict) -> dict:
     print(f"\n[ Discovery Node ] 선정 완료: {', '.join(top_tickers)}")
     for ticker in top_tickers:
         s = scores[ticker]
-        print(f"  {ticker}: 종합 {s['total']} (거래금액 {s['volume']:.0f} / 펀더멘털 {s['fundamental']:.0f} / 버즈 {s['buzz']:.0f} / 언급 {s['mention']:.0f})")
+        print(f"  {ticker}: 종합 {s['total']} (거래대금 {s['volume']:.0f} / 펀더멘털 {s['fundamental']:.0f} / 버즈 {s['buzz']:.0f})")
 
     return {"tickers": top_tickers, "scores": scores}
