@@ -8,7 +8,7 @@
 
 - **AI 종목 자동 발굴** — 거래대금·펀더멘털·뉴스 급증 3가지 신호를 종합해 TOP 5 선정, 섹터 편중 방지 적용
 - **LangChain Tool-calling 분석** — Claude가 필요한 데이터를 스스로 판단해 도구를 호출하고 종목별 투자 브리핑 생성
-- **RAG 기반 공시 분석** — SEC 10-Q(분기 보고서) MD&A 섹션을 ChromaDB에 벡터 저장, Claude가 의미 기반 검색으로 공시 근거 활용
+- **RAG 기반 공시 분석** — SEC 실적 공시(10-Q / 외국기업 6-K·20-F)를 ChromaDB에 벡터 저장, Claude가 의미 기반 검색으로 공시 근거 활용
 - **공시 근거 교차 검증** — 생성된 리포트의 리스크 주장이 실제 SEC 공시로 뒷받침되는지 Claude가 재판정 (할루시네이션 탐지)
 - **LangGraph 병렬 오케스트레이션** — 종목별 분석을 병렬 실행, 전체 처리 시간 단축
 - **매크로 테마 분석** — 선정 종목들을 관통하는 주간 투자 테마 및 섹터 동향 자동 도출
@@ -45,7 +45,7 @@
                   │
                   ▼
    ┌──────────────────────────┐
-   │        RAG Node          │  SEC 10-Q 공시 수집 · 벡터 저장
+   │        RAG Node          │  SEC 실적 공시 수집 · 벡터 저장
    │  (ChromaDB + 임베딩)     │  MD&A 섹션 → ChromaDB 인메모리
    └──────────────┬───────────┘
                   │
@@ -110,11 +110,19 @@ LangChain Tool-calling 에이전트가 종목별로 병렬 실행됩니다.
 
 병렬 분석이 모두 끝난 뒤 한 번 실행되며, 각 종목의 `[리스크]` 주장을 검증합니다.
 
-1. 주장 문장을 질의로 삼아 해당 종목의 10-Q 청크를 RAG로 재검색 (상위 8개)
+1. 주장 문장을 질의로 삼아 해당 종목의 공시 청크를 RAG로 재검색 (상위 8개)
 2. Claude가 "주장이 공시 근거로 뒷받침되는가"를 판정
 3. 결과를 Pydantic 스키마(구조화 출력)로 받아 `state["verifications"]`에 저장
 
-공시에 근거가 없는 주장은 `supported=false`로 표시되어, LLM이 지어낸 내용을 걸러낼 수 있습니다.
+판정은 세 가지로 갈립니다.
+
+| 상태 | 의미 |
+|------|------|
+| ✅ 공시 근거 확인 | 공시가 주장을 뒷받침함 |
+| ⚠️ 공시 근거 부족 | 공시에 관련 내용이 없거나 주장과 어긋남 |
+| — 공시 대조 불가 | 실적 공시를 찾지 못해 판정 자체가 불가 |
+
+'대조 불가'를 따로 둔 이유는, 공시가 없어 확인 못 한 것과 확인해 보니 근거가 없는 것이 전혀 다른 상황이기 때문입니다.
 
 **4단계 — 테마 분석 (Theme Node)**
 
@@ -136,7 +144,7 @@ LangChain Tool-calling 에이전트가 종목별로 병렬 실행됩니다.
 | AI 모델 | Claude Opus 5 (검증) / Claude Sonnet 4.6 (분석·테마) |
 | LLM 프레임워크 | LangChain (`langchain_anthropic`, `@tool`) |
 | AI 오케스트레이션 | LangGraph (StateGraph, Send API) |
-| RAG | ChromaDB + sentence-transformers (SEC 10-Q 공시) |
+| RAG | ChromaDB + sentence-transformers (SEC 10-Q / 6-K / 20-F) |
 | 출력 검증 | Anthropic 구조화 출력 (`messages.parse` + Pydantic) |
 | 종목 발굴 | Yahoo Finance, Finnhub |
 | 주가/재무 데이터 | yfinance |
@@ -158,14 +166,15 @@ stock-briefing/
 │   ├── workflow.py             # 그래프 빌드 (노드 연결)
 │   └── nodes/
 │       ├── discovery.py        # 종목 자동 발굴 (멀티 신호 가중 합산)
-│       ├── rag.py              # SEC 10-Q 수집 및 ChromaDB 벡터 저장
+│       ├── rag.py              # SEC 실적 공시 수집 및 ChromaDB 벡터 저장
 │       ├── report.py           # LangChain Tool-calling 분석 에이전트
 │       ├── verify.py           # 공시 근거 교차 검증 (LLM 판정)
 │       ├── theme.py            # 매크로 테마 분석
 │       └── notify.py           # 이메일 발송
 ├── tools/
 │   ├── langchain_tools.py      # LangChain @tool 래퍼 (Claude 도구 호출용)
-│   ├── rag_tool.py             # SEC EDGAR 10-Q 수집 + ChromaDB 벡터 저장/검색
+│   ├── rag_tool.py             # SEC EDGAR 공시 수집(10-Q→6-K→20-F) + 벡터 저장/검색
+│   ├── finnhub_client.py       # Finnhub 공용 클라이언트 (레이트리밋·429 재시도)
 │   ├── volume_tool.py          # Yahoo 스크리너 → 시총 필터 → 거래대금 정렬
 │   ├── trends_tool.py          # 평소 대비 뉴스 급증 배수
 │   ├── fundamental_tool.py     # PEG/ROE/EPS 펀더멘털 점수
