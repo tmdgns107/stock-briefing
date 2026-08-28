@@ -28,6 +28,7 @@ def trigger():
     return {
         "report_items": result["report_items"],
         "theme": result["theme"],
+        "verifications": result.get("verifications", {}),
     }
 
 
