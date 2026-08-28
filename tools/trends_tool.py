@@ -1,11 +1,10 @@
-import os
 import time
-import finnhub
+
+from tools import finnhub_client
 
 BASELINE_WEEKS = 4      # 기준선으로 삼을 직전 주 수
 MIN_BASELINE = 3.0      # 분모 하한 — 평소 뉴스가 거의 없는 종목의 배수 폭주 방지
 RATIO_CAP = 5.0         # 배수 상한 — 이상치가 정규화를 독점하지 않도록
-API_INTERVAL = 0.8       # Finnhub 무료 티어 60 calls/min 준수 (요청 시간 포함 ~1.1s/call)
 
 _WEEK = 7 * 86400
 
@@ -28,7 +27,6 @@ def get_news_buzz_scores(tickers: list[str]) -> dict[str, float]:
     조회합니다. 단, 한 주에 250건을 넘는 종목은 그 주도 잘리므로 배수가
     실제보다 낮게 나올 수 있습니다.
     """
-    client = finnhub.Client(api_key=os.environ["FINNHUB_API_KEY"])
     now = time.time()
     scores = {}
 
@@ -37,11 +35,10 @@ def get_news_buzz_scores(tickers: list[str]) -> dict[str, float]:
         try:
             for w in range(BASELINE_WEEKS + 1):
                 end = now - w * _WEEK
-                news = client.company_news(
-                    ticker, _from=_day(end - _WEEK), to=_day(end)
+                news = finnhub_client.call(
+                    "company_news", ticker, _from=_day(end - _WEEK), to=_day(end)
                 )
                 weekly.append(len(news))
-                time.sleep(API_INTERVAL)
         except Exception as e:
             print(f"  [Buzz] {ticker} 오류: {type(e).__name__}: {e}")
             scores[ticker] = 0.0
