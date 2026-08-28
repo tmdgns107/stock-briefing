@@ -10,4 +10,5 @@ WEIGHT_FUNDAMENTAL = 0.35               # PEG·ROE·EPS 성장
 WEIGHT_BUZZ = 0.20                      # 뉴스 급증 배수 (평소 대비)
 
 MAX_PER_SECTOR = 2                      # 한 섹터에서 선정할 최대 종목 수 (편중 방지)
+FUNDAMENTAL_PRIOR = 40.0                # 펀더멘털 결측 시 수축(shrink)시킬 기준값
 LLM_MODEL = "claude-opus-5"             # 노드에서 공용으로 쓰는 Claude 모델

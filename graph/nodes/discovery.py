@@ -1,3 +1,5 @@
+import math
+
 from tools.volume_tool import get_most_active_by_dollar_volume
 from tools.trends_tool import get_news_buzz_scores
 from tools.fundamental_tool import get_fundamental_scores
@@ -6,9 +8,27 @@ from config import (
 )
 
 
+def _minmax(scores: dict) -> dict:
+    """
+    후보군 안에서 최소=0, 최대=100 이 되도록 선형 정규화합니다.
+
+    기존에는 거래대금·버즈만 '최대값 대비 비율'로 정규화하고 펀더멘털은
+    절대 점수를 그대로 썼습니다. 결측이 50점으로 채워지는 구조 탓에
+    펀더멘털은 실질적으로 40~100 구간에만 분포해, 0~100 을 모두 쓰는
+    다른 신호와 같은 가중치로 더하면 명목 가중치대로 작동하지 않았습니다.
+    세 신호를 같은 척도로 맞춰야 가중치가 의도한 의미를 갖습니다.
+    """
+    if not scores:
+        return {}
+    lo, hi = min(scores.values()), max(scores.values())
+    if hi == lo:
+        return {k: 50.0 for k in scores}
+    return {k: (v - lo) / (hi - lo) * 100 for k, v in scores.items()}
+
+
 def discovery_node(state: dict) -> dict:
     print("[ Discovery Node ] 거래대금 상위 종목 수집 중...")
-    active_tickers = get_most_active_by_dollar_volume(count=20)
+    active_tickers, dollar_volumes = get_most_active_by_dollar_volume(count=20)
 
     print("\n[ Discovery Node ] 펀더멘털 점수 수집 중...")
     fundamental_scores, sectors = get_fundamental_scores(active_tickers)
@@ -16,20 +36,17 @@ def discovery_node(state: dict) -> dict:
     print("\n[ Discovery Node ] 뉴스 버즈 수집 중 (평소 대비 배수)...")
     buzz_scores = get_news_buzz_scores(active_tickers)
 
-    volume_scores = {ticker: (20 - i) for i, ticker in enumerate(active_tickers)}
+    # 거래대금은 분포가 한쪽으로 크게 치우쳐 있어 로그를 취한 뒤 정규화한다
+    volume_scores = {t: math.log10(max(dollar_volumes.get(t, 0), 1)) for t in active_tickers}
 
-    def normalize(scores: dict) -> dict:
-        max_val = max(scores.values()) if scores and max(scores.values()) > 0 else 1
-        return {k: v / max_val * 100 for k, v in scores.items()}
-
-    vol_norm = normalize(volume_scores)
-    fund_norm = fundamental_scores
-    buzz_norm = normalize(buzz_scores)
+    vol_norm = _minmax(volume_scores)
+    fund_norm = _minmax(fundamental_scores)
+    buzz_norm = _minmax(buzz_scores)
 
     combined = {
         ticker: (
             vol_norm.get(ticker, 0) * WEIGHT_VOLUME
-            + fund_norm.get(ticker, 50) * WEIGHT_FUNDAMENTAL
+            + fund_norm.get(ticker, 0) * WEIGHT_FUNDAMENTAL
             + buzz_norm.get(ticker, 0) * WEIGHT_BUZZ
         )
         for ticker in active_tickers
@@ -42,7 +59,7 @@ def discovery_node(state: dict) -> dict:
         ticker: {
             "total": round(combined[ticker], 1),
             "volume": round(vol_norm.get(ticker, 0), 1),
-            "fundamental": round(fund_norm.get(ticker, 50), 1),
+            "fundamental": round(fund_norm.get(ticker, 0), 1),
             "buzz": round(buzz_norm.get(ticker, 0), 1),
         }
         for ticker in top_tickers
