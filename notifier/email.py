@@ -1,8 +1,34 @@
+import html
 import os
 import smtplib
 from datetime import date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+
+def _verify_badge(verdict: dict | None) -> tuple[str, str]:
+    """검증 결과 → (리스크 헤더 옆 배지, 본문 아래 판정 사유) HTML"""
+    if not verdict:
+        return "", ""
+
+    if verdict.get("supported"):
+        label, bg, fg = "✅ 공시 근거 확인", "#c6f6d5", "#276749"
+    else:
+        label, bg, fg = "⚠️ 공시 근거 부족", "#fefcbf", "#975a16"
+
+    badge = (
+        f'<span style="display:inline-block; margin-left:8px; padding:1px 8px; '
+        f'background:{bg}; color:{fg}; border-radius:10px; '
+        f'font-size:11px; font-weight:600;">{label}</span>'
+    )
+
+    reason = verdict.get("reason", "")
+    reason_html = (
+        f'<div style="font-size:11px; color:#718096; line-height:1.5; margin-top:5px;">'
+        f'검증: {html.escape(reason)}</div>'
+    ) if reason else ""
+
+    return badge, reason_html
 
 
 def _score_bar(score: float, total: int = 5) -> str:
@@ -18,7 +44,7 @@ def _fmt(value, prefix="", suffix="", decimals=2):
     return str(value)
 
 
-def _stock_card(item: dict) -> str:
+def _stock_card(item: dict, verdict: dict | None = None) -> str:
     if item.get("error"):
         return f"""
 <div style="border:1px solid #ddd; border-radius:8px; padding:20px; margin-bottom:20px;">
@@ -40,6 +66,7 @@ def _stock_card(item: dict) -> str:
     high = _fmt(s.get("52w_high"), "$", decimals=2)
     low = _fmt(s.get("52w_low"), "$", decimals=2)
     target = _fmt(s.get("target_price"), "$", decimals=2)
+    badge, verify_reason = _verify_badge(verdict)
 
     return f"""
 <div style="border:1px solid #e2e8f0; border-radius:10px; padding:24px; margin-bottom:24px; background:#fff;">
@@ -103,8 +130,9 @@ def _stock_card(item: dict) -> str:
   </div>
 
   <div style="border-left:3px solid #fc8181; padding-left:14px;">
-    <div style="font-size:12px; color:#c53030; font-weight:700; margin-bottom:4px;">⚠️ 리스크</div>
+    <div style="font-size:12px; color:#c53030; font-weight:700; margin-bottom:4px;">⚠️ 리스크{badge}</div>
     <div style="font-size:13px; color:#2d3748; line-height:1.6;">{a.get('리스크', 'N/A')}</div>
+    {verify_reason}
   </div>
 
 </div>"""
@@ -162,7 +190,11 @@ def _theme_section(theme: dict) -> str:
 </div>"""
 
 
-def send_email(report_items: list[dict], theme: dict | None = None):
+def send_email(
+    report_items: list[dict],
+    theme: dict | None = None,
+    verifications: dict | None = None,
+):
     sender = os.environ["GMAIL_ADDRESS"]
     password = os.environ["GMAIL_APP_PASSWORD"]
     recipient = os.environ["RECIPIENT_EMAIL"]
@@ -175,7 +207,11 @@ def send_email(report_items: list[dict], theme: dict | None = None):
     msg["From"] = sender
     msg["To"] = recipient
 
-    cards = "".join(_stock_card(item) for item in report_items)
+    verifications = verifications or {}
+    cards = "".join(
+        _stock_card(item, verifications.get(item["ticker"]))
+        for item in report_items
+    )
     theme_html = _theme_section(theme) if theme else ""
 
     html = f"""

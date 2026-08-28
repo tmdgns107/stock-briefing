@@ -9,5 +9,9 @@ def notify_node(state: dict) -> dict:
         return {}
 
     print("\n[ Notify Node ] 이메일 발송 중...")
-    send_email(state["report_items"], state["theme"])
+    send_email(
+        state["report_items"],
+        state["theme"],
+        state.get("verifications", {}),
+    )
     return {}
