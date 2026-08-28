@@ -1,10 +1,12 @@
+import html
 import re
 import requests
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 _collection = None
+_ticker_map = None
 
 HEADERS = {"User-Agent": "stock-briefing/1.0 hooon107@gmail.com"}
 
@@ -18,25 +20,38 @@ def _get_collection():
     return _collection
 
 
+def _get_ticker_map() -> dict:
+    """SEC 공식 ticker → CIK 매핑 (프로세스 내 1회만 다운로드)"""
+    global _ticker_map
+    if _ticker_map is None:
+        try:
+            res = requests.get(
+                "https://www.sec.gov/files/company_tickers.json",
+                headers=HEADERS, timeout=20
+            )
+            _ticker_map = {
+                e["ticker"].upper(): str(e["cik_str"])
+                for e in res.json().values() if e.get("ticker")
+            }
+        except Exception:
+            _ticker_map = {}
+    return _ticker_map
+
+
 def _get_cik(ticker: str) -> str | None:
-    url = f"https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22&forms=10-Q&dateRange=custom&startdt=2023-01-01"
+    cik = _get_ticker_map().get(ticker.upper())
+    if cik:
+        return cik
+
+    # fallback: EDGAR 전문 검색 결과의 ciks 필드 사용
+    url = f"https://efts.sec.gov/LATEST/search-index?q=%22{ticker}%22&forms=10-Q"
     try:
         res = requests.get(url, headers=HEADERS, timeout=10)
-        hits = res.json().get("hits", {}).get("hits", [])
-        if hits:
-            return hits[0]["_source"].get("entity_id", "").lstrip("0")
-    except Exception:
-        pass
-
-    # fallback: ticker → CIK lookup via company_tickers.json
-    try:
-        res = requests.get(
-            "https://www.sec.gov/files/company_tickers.json",
-            headers=HEADERS, timeout=10
-        )
-        for entry in res.json().values():
-            if entry.get("ticker", "").upper() == ticker.upper():
-                return str(entry["cik_str"])
+        for hit in res.json().get("hits", {}).get("hits", []):
+            names = " ".join(hit["_source"].get("display_names", []))
+            ciks = hit["_source"].get("ciks", [])
+            if ciks and f"({ticker.upper()})" in names.upper():
+                return ciks[0].lstrip("0")
     except Exception:
         pass
     return None
@@ -50,10 +65,13 @@ def _get_latest_10q_url(cik: str) -> str | None:
         filings = res.json().get("filings", {}).get("recent", {})
         forms = filings.get("form", [])
         accessions = filings.get("accessionNumber", [])
-        for form, acc in zip(forms, accessions):
+        primaries = filings.get("primaryDocument", [])
+        for form, acc, primary in zip(forms, accessions, primaries):
             if form == "10-Q":
                 acc_clean = acc.replace("-", "")
-                return f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}/{acc}.txt"
+                base = f"https://www.sec.gov/Archives/edgar/data/{cik}/{acc_clean}"
+                # 전체 제출본(.txt)은 첨부문서까지 포함해 수십 MB → 본문 문서만 사용
+                return f"{base}/{primary}" if primary else f"{base}/{acc}.txt"
     except Exception:
         pass
     return None
@@ -61,17 +79,25 @@ def _get_latest_10q_url(cik: str) -> str | None:
 
 def _fetch_filing_text(url: str) -> str:
     try:
-        res = requests.get(url, headers=HEADERS, timeout=20)
+        res = requests.get(url, headers=HEADERS, timeout=30)
         text = res.text
         # 태그 제거 및 연속 공백 정리
+        text = re.sub(r"(?is)<(script|style).*?</\1>", " ", text)
         text = re.sub(r"<[^>]+>", " ", text)
+        text = html.unescape(text)
         text = re.sub(r"\s{3,}", "\n", text)
-        # MD&A 섹션만 추출 (없으면 전체 앞부분)
-        match = re.search(
-            r"(management.{0,30}discussion.{0,60}analysis)(.*?)(quantitative.{0,30}qualitative|item\s+3)",
-            text, re.IGNORECASE | re.DOTALL
-        )
-        return match.group(2).strip()[:15000] if match else text[:15000]
+        # MD&A 섹션 추출 — 첫 매치는 대개 목차이므로 가장 긴 본문 매치를 선택
+        bodies = [
+            m.group(2)
+            for m in re.finditer(
+                r"(management.{0,30}discussion.{0,60}analysis)(.*?)"
+                r"(quantitative.{0,30}qualitative|item\s+3)",
+                text, re.IGNORECASE | re.DOTALL,
+            )
+        ]
+        if bodies:
+            return max(bodies, key=len).strip()[:15000]
+        return text[:15000]
     except Exception:
         return ""
 
