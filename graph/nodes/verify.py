@@ -2,7 +2,7 @@ import os
 import anthropic
 from pydantic import BaseModel
 
-from tools.rag_tool import search as rag_search
+from tools.rag_tool import search as rag_search, get_source_form
 from config import LLM_MODEL, REPORT_LANGUAGE
 
 
@@ -23,13 +23,31 @@ def verify_node(state: dict) -> dict:
     """
     print("\n[ Verify Node ] 리포트 근거 검증 중...")
 
-    targets = [
+    candidates = [
         item for item in state["report_items"]
         if not item.get("error") and item.get("analysis", {}).get("리스크")
     ]
+
+    # 공시를 색인하지 못한 종목은 '근거 부족'이 아니라 '대조 불가'다.
+    # 판정이 틀린 게 아니라 대조할 자료 자체가 없는 경우이므로 구분한다.
+    verifications = {}
+    targets = []
+    for item in candidates:
+        ticker = item["ticker"]
+        form = get_source_form(ticker)
+        if form is None:
+            verifications[ticker] = {
+                "ticker": ticker,
+                "supported": None,
+                "reason": "SEC 실적 공시(10-Q/6-K/20-F)를 찾지 못해 대조할 수 없습니다.",
+                "form": None,
+            }
+            print(f"  {ticker}: 대조 불가 — 공시 미확인")
+            continue
+        targets.append(item)
+
     if not targets:
-        print("  검증할 항목 없음")
-        return {"verifications": {}}
+        return {"verifications": verifications}
 
     evidence = "\n\n".join(
         f"[{item['ticker']}]\n"
@@ -66,10 +84,12 @@ ticker는 아래 대괄호 안의 티커를 그대로 사용하세요.
         verdicts = response.parsed_output.verdicts
     except Exception as e:
         print(f"  [Verify Node] 검증 실패: {type(e).__name__}: {e}")
-        return {"verifications": {}}
+        return {"verifications": verifications}
 
     for v in verdicts:
+        form = get_source_form(v.ticker)
         mark = "근거 확인" if v.supported else "근거 부족"
-        print(f"  {v.ticker}: {mark} — {v.reason}")
+        print(f"  {v.ticker}: {mark} ({form}) — {v.reason}")
+        verifications[v.ticker] = {**v.model_dump(), "form": form}
 
-    return {"verifications": {v.ticker: v.model_dump() for v in verdicts}}
+    return {"verifications": verifications}

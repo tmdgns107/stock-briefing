@@ -11,10 +11,15 @@ def _verify_badge(verdict: dict | None) -> tuple[str, str]:
     if not verdict:
         return "", ""
 
-    if verdict.get("supported"):
-        label, bg, fg = "✅ 공시 근거 확인", "#c6f6d5", "#276749"
+    supported = verdict.get("supported")
+    form = verdict.get("form")
+    if supported is None:
+        # 공시 자체가 없어 대조하지 못한 경우 — '근거 부족'과 구분한다
+        label, bg, fg = "— 공시 대조 불가", "#edf2f7", "#4a5568"
+    elif supported:
+        label, bg, fg = f"✅ 공시 근거 확인 ({form})", "#c6f6d5", "#276749"
     else:
-        label, bg, fg = "⚠️ 공시 근거 부족", "#fefcbf", "#975a16"
+        label, bg, fg = f"⚠️ 공시 근거 부족 ({form})", "#fefcbf", "#975a16"
 
     badge = (
         f'<span style="display:inline-block; margin-left:8px; padding:1px 8px; '
