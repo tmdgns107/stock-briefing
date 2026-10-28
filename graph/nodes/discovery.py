@@ -3,8 +3,10 @@ import math
 from tools.volume_tool import get_most_active_by_dollar_volume
 from tools.trends_tool import get_news_buzz_scores
 from tools.fundamental_tool import get_fundamental_scores
+from tools.selection_log import append_selection
 from config import (
     TOP_N, WEIGHT_VOLUME, WEIGHT_FUNDAMENTAL, WEIGHT_BUZZ, MAX_PER_SECTOR,
+    SCORING_POOL, NEGATIVE_DAMPING,
 )
 
 
@@ -26,22 +28,47 @@ def _minmax(scores: dict) -> dict:
     return {k: (v - lo) / (hi - lo) * 100 for k, v in scores.items()}
 
 
+def _direction_factor(negative_share: float) -> float:
+    """
+    악재 비중에 따라 버즈 점수를 깎는 계수(NEGATIVE_DAMPING ~ 1.0).
+
+    뉴스 급증은 그 자체로는 방향이 없는 신호입니다. 소송·리콜·실적 미스로
+    폭증한 종목도 '주목받은 종목'으로 1위에 오를 수 있고, 브리핑을 받는
+    사람은 그것을 추천으로 읽습니다. 그래서 급증 자체는 인정하되
+    악재 비중만큼 신호를 약화시킵니다(제외가 아니라 감쇠 — 악재로 주목받은
+    종목도 브리핑 대상은 될 수 있으나, 상위를 차지할 이유는 없습니다).
+    """
+    return 1.0 - negative_share * (1.0 - NEGATIVE_DAMPING)
+
+
 def discovery_node(state: dict) -> dict:
     print("[ Discovery Node ] 거래대금 상위 종목 수집 중...")
-    active_tickers, dollar_volumes = get_most_active_by_dollar_volume(count=20)
+    active_tickers, universe_volumes, prices = get_most_active_by_dollar_volume(
+        count=SCORING_POOL
+    )
 
     print("\n[ Discovery Node ] 펀더멘털 점수 수집 중...")
     fundamental_scores, sectors = get_fundamental_scores(active_tickers)
 
-    print("\n[ Discovery Node ] 뉴스 버즈 수집 중 (평소 대비 배수)...")
-    buzz_scores = get_news_buzz_scores(active_tickers)
+    print("\n[ Discovery Node ] 뉴스 버즈 수집 중 (평소 대비 배수 + 방향)...")
+    buzz_meta = get_news_buzz_scores(active_tickers)
 
-    # 거래대금은 분포가 한쪽으로 크게 치우쳐 있어 로그를 취한 뒤 정규화한다
-    volume_scores = {t: math.log10(max(dollar_volumes.get(t, 0), 1)) for t in active_tickers}
+    # 거래대금은 분포가 한쪽으로 크게 치우쳐 있어 로그를 취한 뒤 정규화한다.
+    # 정규화 기준은 '필터 통과 전체'다. 상위 SCORING_POOL 안에서만 정규화하면
+    # 서로 비슷한 값의 미세한 차이가 0~100 으로 증폭되어, 거래대금이
+    # 명목 가중치(45%)보다 훨씬 강하게 작동한다.
+    universe_log = {t: math.log10(max(v, 1)) for t, v in universe_volumes.items()}
+    vol_norm_all = _minmax(universe_log)
+    vol_norm = {t: vol_norm_all.get(t, 0) for t in active_tickers}
 
-    vol_norm = _minmax(volume_scores)
+    # 버즈는 급증 배수에 방향 계수를 곱한 뒤 정규화한다
+    buzz_adjusted = {
+        t: m["ratio"] * _direction_factor(m["negative_share"])
+        for t, m in buzz_meta.items()
+    }
+
     fund_norm = _minmax(fundamental_scores)
-    buzz_norm = _minmax(buzz_scores)
+    buzz_norm = _minmax(buzz_adjusted)
 
     combined = {
         ticker: (
@@ -74,11 +101,16 @@ def discovery_node(state: dict) -> dict:
     print(f"\n[ Discovery Node ] 선정 완료: {', '.join(top_tickers)}")
     for ticker in top_tickers:
         s = scores[ticker]
+        meta = buzz_meta.get(ticker, {})
+        neg = meta.get("negative_share", 0.0)
+        tone = f" 악재비중 {neg:.0%}" if neg else ""
         print(
             f"  {ticker}: 종합 {s['total']} "
             f"(거래대금 {s['volume']:.0f} / 펀더멘털 {s['fundamental']:.0f} / 버즈 {s['buzz']:.0f})"
-            f" [{sectors.get(ticker, '기타')}]"
+            f" [{sectors.get(ticker, '기타')}]{tone}"
         )
+
+    append_selection(top_tickers, scores, sectors, prices, buzz_meta)
 
     return {"tickers": top_tickers, "scores": scores}
 

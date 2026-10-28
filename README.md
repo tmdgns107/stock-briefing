@@ -7,6 +7,8 @@
 ## 주요 기능
 
 - **AI 종목 자동 발굴** — 거래대금·펀더멘털·뉴스 급증 3가지 신호를 종합해 TOP 5 선정, 섹터 편중 방지 적용
+- **악재 급증 감쇠** — 뉴스가 늘어난 '방향'을 판정해, 소송·리콜·실적 미스로 폭증한 종목이 상위를 차지하지 않도록 조정
+- **선정 이력 누적** — 매 실행의 신호별 점수와 선정 시점 주가를 기록해 사후 성과 검증이 가능하도록 보관
 - **LangChain Tool-calling 분석** — Claude가 필요한 데이터를 스스로 판단해 도구를 호출하고 종목별 투자 브리핑 생성
 - **RAG 기반 공시 분석** — SEC 실적 공시(10-Q / 외국기업 6-K·20-F)를 ChromaDB에 벡터 저장, Claude가 의미 기반 검색으로 공시 근거 활용
 - **공시 근거 교차 검증** — 생성된 리포트의 리스크 주장이 실제 SEC 공시로 뒷받침되는지 Claude가 재판정 (할루시네이션 탐지)
@@ -89,10 +91,12 @@
 |------|------|--------|
 | 거래대금 | Yahoo Finance Most Active (log 스케일) | 45% |
 | 펀더멘털 점수 | PEG(40%) + ROE(30%) + EPS성장(30%) | 35% |
-| 뉴스 급증 배수 | 이번 주 뉴스량 ÷ 직전 4주 평균 (Finnhub) | 20% |
+| 뉴스 급증 배수 | (이번 주 뉴스량 ÷ 직전 4주 평균) × 방향 계수 (Finnhub) | 20% |
 
-- 후보 250종목(Yahoo 최대치)을 받아 **시총 $2B ~ $500B** 구간만 대상 (config에서 조정 가능)
+- 후보 250종목(Yahoo 최대치)을 받아 **시총 $2B ~ $500B** + **일 거래대금 $3억 이상** 구간만 대상 (config에서 조정 가능)
 - 3개 신호를 **동일한 min-max 척도(0~100)** 로 정규화 후 가중 합산 → 상위 5종목 선정
+- 거래대금은 **필터를 통과한 전체 모집단 기준**으로 정규화 — 상위 20개 안에서만 정규화하면 서로 비슷한 값의 미세한 차이가 0~100으로 증폭되어 명목 가중치보다 강하게 작동함
+- 뉴스 급증에는 **방향 계수**(1.0 ~ 0.4)를 곱함 — 이번 주 헤드라인의 악재 비중이 높을수록 감쇠. 급증 자체는 인정하되 악재로 주목받은 종목이 상위를 차지하지 않게 함
 - 펀더멘털 지표 결측 시 중립값이 아니라 **사전값(40) 쪽으로 수축**시켜 '데이터 없음'이 유리해지지 않도록 처리
 - **섹터당 최대 2종목** 제약으로 편중 방지 (제약으로 자리가 남으면 점수순 보충)
 
@@ -147,6 +151,7 @@ LangChain Tool-calling 에이전트가 종목별로 병렬 실행됩니다.
 | RAG | ChromaDB + sentence-transformers (SEC 10-Q / 6-K / 20-F) |
 | 출력 검증 | Anthropic 구조화 출력 (`messages.parse` + Pydantic) |
 | 종목 발굴 | Yahoo Finance, Finnhub |
+| 뉴스 방향 판정 | 키워드 기반 (추가 API 호출 없음, 재현 가능) |
 | 주가/재무 데이터 | yfinance |
 | 뉴스 데이터 | Finnhub API |
 | 자동화 | GitHub Actions |
@@ -182,6 +187,8 @@ stock-briefing/
 │   └── news_tool.py            # Finnhub 종목 뉴스 수집
 ├── notifier/
 │   └── email.py                # Gmail HTML 이메일 발송
+├── data/
+│   └── selections.jsonl        # 주간 선정 이력 (CI가 커밋해 누적)
 ├── config.py                   # TOP_N, MAX_MARKET_CAP, LLM_MODEL 등 설정
 ├── main.py                     # 진입점
 └── requirements.txt
@@ -278,6 +285,9 @@ GitHub 레포지토리 → Settings → Secrets and variables → Actions에서 
 ```python
 TOP_N = 5                           # 최종 분석할 종목 수 (늘릴수록 API 비용 증가)
 MAX_MARKET_CAP = 500_000_000_000    # 시총 상한선 — $500B 이하 종목만 선정
+MIN_DOLLAR_VOLUME = 300_000_000     # 일 거래대금 하한 — 유동성 절대 기준
+SCORING_POOL = 20                   # 신호를 측정할 후보 수 (늘리면 실행 시간 증가)
+NEGATIVE_DAMPING = 0.4              # 악재 비중 100%일 때 버즈에 곱할 계수
 REPORT_LANGUAGE = "Korean"          # 리포트 언어
 LLM_MODEL = "claude-opus-5"         # Verify 노드가 사용하는 모델
 ```
